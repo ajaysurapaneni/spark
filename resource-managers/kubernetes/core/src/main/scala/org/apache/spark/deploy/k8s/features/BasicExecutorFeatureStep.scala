@@ -78,6 +78,11 @@ private[spark] class BasicExecutorFeatureStep(
     }
   private val executorLimitCores = kubernetesConf.get(KUBERNETES_EXECUTOR_LIMIT_CORES)
 
+  // SecurityContext setting
+  private val runAsUser = kubernetesConf.sparkConf.getLong("spark.kubernetes.securitycontext.runasuser", SECURITYCONTEXT_RUN_AS_USER )
+  private val fsGroup =  kubernetesConf.sparkConf.getLong("spark.kubernetes.securitycontext.fsgroup", SECURITYCONTEXT_FS_GROUP )
+  private val runAsUserName = kubernetesConf.sparkConf.get("spark.kubernetes.securitycontext.runasusername", SECURITYCONTEXT_RUN_AS_USERNAME )
+
   override def configurePod(pod: SparkPod): SparkPod = {
     val name = s"$executorPodNamePrefix-exec-${kubernetesConf.roleSpecificConf.executorId}"
 
@@ -115,6 +120,7 @@ private[spark] class BasicExecutorFeatureStep(
       (ENV_APPLICATION_ID, kubernetesConf.appId),
       // This is to set the SPARK_CONF_DIR to be /opt/spark/conf
       (ENV_SPARK_CONF_DIR, SPARK_CONF_DIR_INTERNAL),
+      ("RUNASUSERNAME", runAsUserName),
       (ENV_EXECUTOR_ID, kubernetesConf.roleSpecificConf.executorId)) ++
       kubernetesConf.roleEnvs)
       .map(env => new EnvVarBuilder()
@@ -178,6 +184,10 @@ private[spark] class BasicExecutorFeatureStep(
         .addToOwnerReferences(ownerReference.toSeq: _*)
         .endMetadata()
       .editOrNewSpec()
+        .withNewSecurityContext()
+          .withRunAsUser(runAsUser)
+          .withFsGroup(fsGroup)
+        .endSecurityContext()
         .withHostname(hostname)
         .withRestartPolicy("Never")
         .withNodeSelector(kubernetesConf.nodeSelector().asJava)

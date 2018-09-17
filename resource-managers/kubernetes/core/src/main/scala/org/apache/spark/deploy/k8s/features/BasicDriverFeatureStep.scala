@@ -53,6 +53,11 @@ private[spark] class BasicDriverFeatureStep(
       MEMORY_OVERHEAD_MIN_MIB))
   private val driverMemoryWithOverheadMiB = driverMemoryMiB + memoryOverheadMiB
 
+  // SecurityContext setting
+  private val runAsUser = conf.sparkConf.getLong("spark.kubernetes.securitycontext.runasuser", SECURITYCONTEXT_RUN_AS_USER )
+  private val fsGroup =  conf.sparkConf.getLong("spark.kubernetes.securitycontext.fsgroup", SECURITYCONTEXT_FS_GROUP )
+  private val runAsUserName = conf.sparkConf.get("spark.kubernetes.securitycontext.runasusername", SECURITYCONTEXT_RUN_AS_USERNAME )
+
   override def configurePod(pod: SparkPod): SparkPod = {
     val driverCustomEnvs = conf.roleEnvs
       .toSeq
@@ -100,6 +105,10 @@ private[spark] class BasicDriverFeatureStep(
         .endPort()
       .addAllToEnv(driverCustomEnvs.asJava)
       .addNewEnv()
+        .withName("RUNASUSERNAME")
+        .withValue(runAsUserName)
+       .endEnv()
+      .addNewEnv()
         .withName(ENV_DRIVER_BIND_ADDRESS)
         .withValueFrom(new EnvVarSourceBuilder()
           .withNewFieldRef("v1", "status.podIP")
@@ -120,6 +129,10 @@ private[spark] class BasicDriverFeatureStep(
         .addToAnnotations(conf.roleAnnotations.asJava)
         .endMetadata()
       .withNewSpec()
+        .withNewSecurityContext()
+          .withRunAsUser(runAsUser)
+          .withFsGroup(fsGroup)
+        .endSecurityContext()
         .withRestartPolicy("Never")
         .withNodeSelector(conf.nodeSelector().asJava)
         .addToImagePullSecrets(conf.imagePullSecrets(): _*)
