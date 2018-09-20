@@ -49,6 +49,9 @@ private[spark] class KubernetesSuite extends SparkFunSuite
   protected var sparkAppConf: SparkAppConf = _
   protected var containerLocalSparkDistroExamplesJar: String = _
   protected var appLocator: String = _
+  protected var runAsUser = 1500
+  protected var fsGroup = 1500
+  protected var runAsUserName = "spark"
 
   // Default memory limit is 1024M + 384M (minimum overhead constant)
   private val baseMemory = s"${1024 + 384}Mi"
@@ -109,6 +112,9 @@ private[spark] class KubernetesSuite extends SparkFunSuite
       .set("spark.kubernetes.driver.pod.name", driverPodName)
       .set("spark.kubernetes.driver.label.spark-app-locator", appLocator)
       .set("spark.kubernetes.executor.label.spark-app-locator", appLocator)
+      .set("spark.kubernetes.securitycontext.runasusername", "spark")
+      .set("spark.kubernetes.securitycontext.fsgroup","1500")
+      .set("spark.kubernetes.securitycontext.runasuser","1500")
     if (!kubernetesTestComponents.hasUserSpecifiedNamespace) {
       kubernetesTestComponents.createNamespace()
     }
@@ -122,12 +128,12 @@ private[spark] class KubernetesSuite extends SparkFunSuite
   }
 
   protected def runSparkPiAndVerifyCompletion(
-      appResource: String = containerLocalSparkDistroExamplesJar,
-      driverPodChecker: Pod => Unit = doBasicDriverPodCheck,
-      executorPodChecker: Pod => Unit = doBasicExecutorPodCheck,
-      appArgs: Array[String] = Array.empty[String],
-      appLocator: String = appLocator,
-      isJVM: Boolean = true ): Unit = {
+                                               appResource: String = containerLocalSparkDistroExamplesJar,
+                                               driverPodChecker: Pod => Unit = doBasicDriverPodCheck,
+                                               executorPodChecker: Pod => Unit = doBasicExecutorPodCheck,
+                                               appArgs: Array[String] = Array.empty[String],
+                                               appLocator: String = appLocator,
+                                               isJVM: Boolean = true ): Unit = {
     runSparkApplicationAndVerifyCompletion(
       appResource,
       SPARK_PI_MAIN_CLASS,
@@ -140,11 +146,11 @@ private[spark] class KubernetesSuite extends SparkFunSuite
   }
 
   protected def runSparkRemoteCheckAndVerifyCompletion(
-      appResource: String = containerLocalSparkDistroExamplesJar,
-      driverPodChecker: Pod => Unit = doBasicDriverPodCheck,
-      executorPodChecker: Pod => Unit = doBasicExecutorPodCheck,
-      appArgs: Array[String],
-      appLocator: String = appLocator): Unit = {
+                                                        appResource: String = containerLocalSparkDistroExamplesJar,
+                                                        driverPodChecker: Pod => Unit = doBasicDriverPodCheck,
+                                                        executorPodChecker: Pod => Unit = doBasicExecutorPodCheck,
+                                                        appArgs: Array[String],
+                                                        appLocator: String = appLocator): Unit = {
     runSparkApplicationAndVerifyCompletion(
       appResource,
       SPARK_REMOTE_MAIN_CLASS,
@@ -157,11 +163,11 @@ private[spark] class KubernetesSuite extends SparkFunSuite
   }
 
   protected def runSparkJVMCheckAndVerifyCompletion(
-      appResource: String = containerLocalSparkDistroExamplesJar,
-      mainClass: String = SPARK_DRIVER_MAIN_CLASS,
-      driverPodChecker: Pod => Unit = doBasicDriverPodCheck,
-      appArgs: Array[String] = Array("5"),
-      expectedJVMValue: Seq[String]): Unit = {
+                                                     appResource: String = containerLocalSparkDistroExamplesJar,
+                                                     mainClass: String = SPARK_DRIVER_MAIN_CLASS,
+                                                     driverPodChecker: Pod => Unit = doBasicDriverPodCheck,
+                                                     appArgs: Array[String] = Array("5"),
+                                                     expectedJVMValue: Seq[String]): Unit = {
     val appArguments = SparkAppArguments(
       mainAppResource = appResource,
       mainClass = mainClass,
@@ -194,15 +200,15 @@ private[spark] class KubernetesSuite extends SparkFunSuite
   }
 
   protected def runSparkApplicationAndVerifyCompletion(
-      appResource: String,
-      mainClass: String,
-      expectedLogOnCompletion: Seq[String],
-      appArgs: Array[String],
-      driverPodChecker: Pod => Unit,
-      executorPodChecker: Pod => Unit,
-      appLocator: String,
-      isJVM: Boolean,
-      pyFiles: Option[String] = None): Unit = {
+                                                        appResource: String,
+                                                        mainClass: String,
+                                                        expectedLogOnCompletion: Seq[String],
+                                                        appArgs: Array[String],
+                                                        driverPodChecker: Pod => Unit,
+                                                        executorPodChecker: Pod => Unit,
+                                                        appLocator: String,
+                                                        isJVM: Boolean,
+                                                        pyFiles: Option[String] = None): Unit = {
     val appArguments = SparkAppArguments(
       mainAppResource = appResource,
       mainClass = mainClass,
@@ -245,12 +251,23 @@ private[spark] class KubernetesSuite extends SparkFunSuite
     }
   }
 
+  protected def doDriverPodSecurityContextCheck(driverPod: Pod): Unit = {
+    assert(driverPod.getSpec.getSecurityContext.getFsGroup === fsGroup)
+    assert(driverPod.getSpec.getSecurityContext.getRunAsUser === runAsUser)
+  }
+
+  protected def doExecutorPodSecurityContextCheck(executorPod: Pod): Unit = {
+    assert(executorPod.getSpec.getSecurityContext.getFsGroup === fsGroup)
+    assert(executorPod.getSpec.getSecurityContext.getRunAsUser === runAsUser)
+  }
+  
   protected def doBasicDriverPodCheck(driverPod: Pod): Unit = {
     assert(driverPod.getMetadata.getName === driverPodName)
     assert(driverPod.getSpec.getContainers.get(0).getImage === image)
     assert(driverPod.getSpec.getContainers.get(0).getName === "spark-kubernetes-driver")
     assert(driverPod.getSpec.getContainers.get(0).getResources.getRequests.get("memory").getAmount
       === baseMemory)
+    doDriverPodSecurityContextCheck(driverPod)
   }
 
 
@@ -260,6 +277,7 @@ private[spark] class KubernetesSuite extends SparkFunSuite
     assert(driverPod.getSpec.getContainers.get(0).getName === "spark-kubernetes-driver")
     assert(driverPod.getSpec.getContainers.get(0).getResources.getRequests.get("memory").getAmount
       === standardNonJVMMemory)
+    doDriverPodSecurityContextCheck(driverPod)
   }
 
   protected def doBasicDriverRPodCheck(driverPod: Pod): Unit = {
@@ -268,6 +286,7 @@ private[spark] class KubernetesSuite extends SparkFunSuite
     assert(driverPod.getSpec.getContainers.get(0).getName === "spark-kubernetes-driver")
     assert(driverPod.getSpec.getContainers.get(0).getResources.getRequests.get("memory").getAmount
       === standardNonJVMMemory)
+    doDriverPodSecurityContextCheck(driverPod)
   }
 
 
@@ -276,6 +295,7 @@ private[spark] class KubernetesSuite extends SparkFunSuite
     assert(executorPod.getSpec.getContainers.get(0).getName === "executor")
     assert(executorPod.getSpec.getContainers.get(0).getResources.getRequests.get("memory").getAmount
       === baseMemory)
+    doExecutorPodSecurityContextCheck(executorPod)
   }
 
   protected def doBasicExecutorPyPodCheck(executorPod: Pod): Unit = {
@@ -283,6 +303,7 @@ private[spark] class KubernetesSuite extends SparkFunSuite
     assert(executorPod.getSpec.getContainers.get(0).getName === "executor")
     assert(executorPod.getSpec.getContainers.get(0).getResources.getRequests.get("memory").getAmount
       === standardNonJVMMemory)
+    doExecutorPodSecurityContextCheck(executorPod)
   }
 
   protected def doBasicExecutorRPodCheck(executorPod: Pod): Unit = {
@@ -290,6 +311,7 @@ private[spark] class KubernetesSuite extends SparkFunSuite
     assert(executorPod.getSpec.getContainers.get(0).getName === "executor")
     assert(executorPod.getSpec.getContainers.get(0).getResources.getRequests.get("memory").getAmount
       === standardNonJVMMemory)
+    doExecutorPodSecurityContextCheck(executorPod)
   }
 
   protected def doDriverMemoryCheck(driverPod: Pod): Unit = {
